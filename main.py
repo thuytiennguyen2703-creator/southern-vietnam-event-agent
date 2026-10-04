@@ -23,7 +23,7 @@ logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 # 3. Import các module
 from src.database import init_db
 from src.bot_handler import start_bot_polling, send_daily_event_report
-from src.parser import run_full_pipeline
+from pipeline import run_full_pipeline
 
 # -------------------------------------------------------------
 # HTTP Server cho Render Health Check
