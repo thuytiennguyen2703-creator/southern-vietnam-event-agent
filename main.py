@@ -78,6 +78,15 @@ if __name__ == "__main__":
     # Khởi tạo Database
     init_db()
 
+    # 2. CHẠY CÀO DỮ LIỆU NGAY LẦN ĐẦU KHỞI ĐỘNG (Để có data dùng ngay)
+    logging.info("🔄 Đang tiến hành cào dữ liệu ban đầu cho Bot...")
+    try:
+        from src.parser import run_full_pipeline  # Thay bằng hàm cào dữ liệu/Gemini parser của bạn
+        run_full_pipeline()
+        logging.info("✅ Cào dữ liệu ban đầu thành công!")
+    except Exception as e:
+        logging.error(f"⚠️ Lỗi khi cào dữ liệu ban đầu: {e}")
+
     logging.info("🌟 Đang khởi động Event Agent System...")
 
     # Luồng 1: HTTP Server cho Render Port Check
