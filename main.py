@@ -34,6 +34,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Southern Vietnam Event Agent is Live & Running!")
 
+    def do_HEAD(self):
+        # Thêm hàm này để UptimeRobot dùng phương thức HEAD không bị lỗi 501
+        self.send_response(200)
+        self.end_headers()
+
     def log_message(self, format, *args):
         return
 
