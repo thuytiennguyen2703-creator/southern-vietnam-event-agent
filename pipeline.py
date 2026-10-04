@@ -46,7 +46,7 @@ def run_full_pipeline():
     logger.info("🚀 Bắt đầu chạy full pipeline cào dữ liệu...")
     try:
         # 1. Gọi scraper cào bài viết thô
-        raw_arts = fetch_raw_articles()
+        raw_arts = fetch_all_sources()
         logger.info(f"Thu thập được {len(raw_arts)} bài viết thô từ các nguồn.")
         
         # 2. Gọi parser xử lý dữ liệu
