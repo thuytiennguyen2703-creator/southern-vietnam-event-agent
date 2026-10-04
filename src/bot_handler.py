@@ -20,6 +20,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bot_handler")
 
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# Handler phản hồi 200 OK cho Render health check
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+        
+    def log_message(self, format, *args):
+        # Tắt log HTTP rác để bớt tràn terminal
+        return
+
+def start_health_check_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
 
 def clean_text(text: str) -> str:
     """Giải mã HTML Entities và loại bỏ triệt để các thẻ HTML rác gây lỗi Telegram API."""
