@@ -11,7 +11,7 @@ from datetime import datetime
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
 
-# 2. Cấu hình Logging & Tắt log rác từ httpx/telegram
+# 2. Cấu hình Logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - [%(name)s] %(message)s",
@@ -20,14 +20,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 
-# 3. Import các hàm từ thư mục src/
+# 3. Import các module
 from src.database import init_db
 from src.bot_handler import start_bot_polling, send_daily_event_report
-# Nếu bạn có module cào dữ liệu/parser trong src, import vào đây:
-# from src.parser import run_full_pipeline  
+from src.parser import run_full_pipeline
 
 # -------------------------------------------------------------
-# HTTP Server nhẹ cho Render Health Check (Port Binding)
+# HTTP Server cho Render Health Check
 # -------------------------------------------------------------
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -36,7 +35,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Southern Vietnam Event Agent is Live & Running!")
 
     def log_message(self, format, *args):
-        return  # Tắt log HTTP rác
+        return
 
 def start_health_check_server():
     port = int(os.environ.get("PORT", 8080))
@@ -45,7 +44,7 @@ def start_health_check_server():
     server.serve_forever()
 
 # -------------------------------------------------------------
-# Luồng Lập lịch Cào dữ liệu & Gửi báo cáo tự động hàng ngày
+# Luồng Lập lịch Cào dữ liệu & Gửi báo cáo hàng ngày
 # -------------------------------------------------------------
 def daily_scheduler_loop():
     TARGET_HOUR = 7  # Gửi báo cáo lúc 07:00 sáng
@@ -58,46 +57,43 @@ def daily_scheduler_loop():
         if now.hour == TARGET_HOUR and last_run_day != now.date():
             logging.info("🚀 Đến giờ hẹn! Bắt đầu cào dữ liệu & gửi báo cáo hàng ngày...")
             try:
-                # Nếu có hàm cào dữ liệu, mở comment dòng dưới:
-                # run_full_pipeline()
-                
-                # Gửi báo cáo sự kiện qua Telegram
+                # KÍCH HOẠT CÀO DỮ LIỆU ĐỊNH KỲ
+                run_full_pipeline()
                 send_daily_event_report()
-                
                 last_run_day = now.date()
                 logging.info("✅ Hoàn tất gửi báo cáo hàng ngày!")
             except Exception as e:
-                logging.error(f"❌ Lỗi trong quá trình chạy luồng hàng ngày: {e}")
+                logging.error(f"❌ Lỗi trong quá trình chạy luồng hàng ngày: {e}", exc_info=True)
 
         time.sleep(60)
 
 # -------------------------------------------------------------
-# Khởi chạy toàn bộ hệ thống
+# Khởi chạy hệ thống
 # -------------------------------------------------------------
 if __name__ == "__main__":
     # Khởi tạo Database
     init_db()
 
-    # 2. CHẠY CÀO DỮ LIỆU NGAY LẦN ĐẦU KHỞI ĐỘNG (Để có data dùng ngay)
-    logging.info("🔄 Đang tiến hành cào dữ liệu ban đầu cho Bot...")
+    # Chạy cào dữ liệu ngay lần đầu khởi động để có Data ngay
+    logging.info("🔄 Đang tiến hành cào dữ liệu ban đầu...")
     try:
-        from src.parser import run_full_pipeline  # Thay bằng hàm cào dữ liệu/Gemini parser của bạn
         run_full_pipeline()
-        logging.info("✅ Cào dữ liệu ban đầu thành công!")
+        logging.info("✅ Cào dữ liệu ban đầu hoàn tất!")
     except Exception as e:
-        logging.error(f"⚠️ Lỗi khi cào dữ liệu ban đầu: {e}")
+        # In chi tiết vết lỗi (traceback) ra Log Render
+        logging.error(f"⚠️ Cào dữ liệu ban đầu thất bại: {e}", exc_info=True)
 
     logging.info("🌟 Đang khởi động Event Agent System...")
 
-    # Luồng 1: HTTP Server cho Render Port Check
+    # Luồng 1: HTTP Server
     t_http = threading.Thread(target=start_health_check_server, daemon=True)
     t_http.start()
 
-    # Luồng 2: Scheduler cào dữ liệu & gửi tin nhắn hàng ngày
+    # Luồng 2: Scheduler
     t_scheduler = threading.Thread(target=daily_scheduler_loop, daemon=True)
     t_scheduler.start()
 
-    # Luồng 3 (Luồng chính): Chạy Telegram Bot
+    # Luồng 3: Telegram Bot
     logging.info("🤖 Bot Telegram đang chạy ngầm 24/7...")
     try:
         start_bot_polling()
