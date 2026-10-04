@@ -33,6 +33,7 @@ def init_db():
             scale TEXT,
             priority TEXT,
             source_name TEXT,
+            published TEXT,
             is_sent INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
