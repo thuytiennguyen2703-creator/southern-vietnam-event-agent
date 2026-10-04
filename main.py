@@ -1,18 +1,33 @@
 import os
+import sys
 import time
 import logging
 import threading
+from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
-# Import các hàm từ module của bạn
-from bot_handler import run_bot, send_daily_event_report # Hàm chạy bot và gửi báo cáo hàng ngày
-from parser import run_full_pipeline # Hàm cào web, dùng Gemini bóc tách, lưu SQLite/Excel
+# 1. Thêm thư mục gốc vào sys.path để import chuẩn các module trong src/
+BASE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE_DIR))
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# 2. Cấu hình Logging & Tắt log rác từ httpx/telegram
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - [%(name)s] %(message)s",
+)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+
+# 3. Import các hàm từ thư mục src/
+from src.database import init_db
+from src.bot_handler import start_bot_polling, send_daily_event_report
+# Nếu bạn có module cào dữ liệu/parser trong src, import vào đây:
+# from src.parser import run_full_pipeline  
 
 # -------------------------------------------------------------
-# 1. Luồng HTTP Server nhẹ để Render kiểm tra Port (Health Check)
+# HTTP Server nhẹ cho Render Health Check (Port Binding)
 # -------------------------------------------------------------
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -30,50 +45,52 @@ def start_health_check_server():
     server.serve_forever()
 
 # -------------------------------------------------------------
-# 2. Luồng Lập lịch Cào dữ liệu & Gửi báo cáo tự động hàng ngày
+# Luồng Lập lịch Cào dữ liệu & Gửi báo cáo tự động hàng ngày
 # -------------------------------------------------------------
 def daily_scheduler_loop():
-    """
-    Luồng ngầm chạy 24/7 kiểm tra giờ để cào dữ liệu & tự động gửi tin nhắn báo cáo hàng ngày.
-    """
-    TARGET_HOUR = 7  # Ví dụ: Tự động chạy cào & gửi tin nhắn vào 07:00 sáng hàng ngày
+    TARGET_HOUR = 7  # Gửi báo cáo lúc 07:00 sáng
     last_run_day = None
 
-    logging.info(f"⏰ Scheduler đã khởi động (Lịch cào & gửi báo cáo cố định lúc {TARGET_HOUR}:00 AM hàng ngày)...")
+    logging.info(f"⏰ Scheduler đã khởi động (Chạy định kỳ {TARGET_HOUR}:00 AM hàng ngày)...")
     
     while True:
         now = datetime.now()
-        # Kiểm tra nếu đúng giờ cài đặt và hôm nay chưa chạy
         if now.hour == TARGET_HOUR and last_run_day != now.date():
-            logging.info("🚀 Đến giờ hẹn! Bắt đầu luồng cào dữ liệu mới & cập nhật Database...")
+            logging.info("🚀 Đến giờ hẹn! Bắt đầu cào dữ liệu & gửi báo cáo hàng ngày...")
             try:
-                # 1. Chạy pipeline cào web + Gemini AI
-                run_full_pipeline()
+                # Nếu có hàm cào dữ liệu, mở comment dòng dưới:
+                # run_full_pipeline()
                 
-                # 2. Gửi thông báo sự kiện mới/hôm nay trực tiếp qua Telegram
+                # Gửi báo cáo sự kiện qua Telegram
                 send_daily_event_report()
                 
                 last_run_day = now.date()
-                logging.info("✅ Hoàn tất luồng cào dữ liệu và gửi thông báo hàng ngày!")
+                logging.info("✅ Hoàn tất gửi báo cáo hàng ngày!")
             except Exception as e:
                 logging.error(f"❌ Lỗi trong quá trình chạy luồng hàng ngày: {e}")
 
-        time.sleep(60)  # Kiểm tra mỗi 1 phút một lần
+        time.sleep(60)
 
 # -------------------------------------------------------------
-# 3. Luồng Khởi chạy Hệ thống Chính
+# Khởi chạy toàn bộ hệ thống
 # -------------------------------------------------------------
 if __name__ == "__main__":
+    # Khởi tạo Database
+    init_db()
+
     logging.info("🌟 Đang khởi động Event Agent System...")
 
-    # Luồng 1: Chạy HTTP Server ngầm cho Render Port Binding
+    # Luồng 1: HTTP Server cho Render Port Check
     t_http = threading.Thread(target=start_health_check_server, daemon=True)
     t_http.start()
 
-    # Luồng 2: Chạy Scheduler cào dữ liệu & gửi tin nhắn tự động hàng ngày
+    # Luồng 2: Scheduler cào dữ liệu & gửi tin nhắn hàng ngày
     t_scheduler = threading.Thread(target=daily_scheduler_loop, daemon=True)
     t_scheduler.start()
 
-    # Luồng 3 (Luồng chính): Chạy Telegram Bot nhận lệnh tra cứu (/homnay, /tuannay, /excel,...)
-    logging.info("🤖 Đang kết nối Bot Telegram...")
-    run_bot()
+    # Luồng 3 (Luồng chính): Chạy Telegram Bot
+    logging.info("🤖 Bot Telegram đang chạy ngầm 24/7...")
+    try:
+        start_bot_polling()
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("✅ Đã dừng Bot Telegram an toàn.")

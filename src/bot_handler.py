@@ -400,6 +400,27 @@ async def cmd_excel_thang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.args = ["thang"]
     await cmd_excel(update, context)
 
+def send_daily_event_report():
+    """Hàm tự động gửi báo cáo sự kiện hàng ngày qua Telegram."""
+    init_db()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM events WHERE raw_date >= ? ORDER BY raw_date ASC LIMIT 10",
+        (today_str,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        send_telegram_message("<b>BẢN TIN SỰ KIỆN HÔM NAY</b>\n\nHôm nay chưa ghi nhận sự kiện mới nào.")
+        return
+
+    events = [dict(r) for r in rows]
+    report = format_daily_report(events, title_prefix="BẢN TIN SỰ KIỆN MIỀN NAM")
+    send_telegram_message(report)
 
 def start_bot_polling():
     """Khởi chạy Bot lắng nghe 24/7 toàn bộ các lệnh."""
