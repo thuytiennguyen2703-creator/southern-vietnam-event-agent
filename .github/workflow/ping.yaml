@@ -1,0 +1,15 @@
+name: Ping Render Service
+
+on:
+  schedule:
+    # Chạy định kỳ mỗi 10 phút một lần
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Cho phép bấm chạy thủ công trên GitHub
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send HTTP request to Render
+        run: |
+          curl -I https://southern-vietnam-event-agent.onrender.com
