@@ -26,7 +26,7 @@ from src.bot_handler import (
     excel_command,
 )
 
-from src.database import get_upcoming_events
+from src.database import get_upcoming_events, init_db
 from pipeline import run_pipeline
 
 
@@ -200,6 +200,8 @@ def start_health_server():
     print(f"Health server is running on port {port}")
 
 def main():
+    init_db()
+
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError(
             "TELEGRAM_BOT_TOKEN chưa được cấu hình trong .env"
