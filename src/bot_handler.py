@@ -18,25 +18,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bot_handler")
 
-import os
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-# Handler phản hồi 200 OK cho Render health check
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is alive!")
-
-    def log_message(self, format, *args):
-        # Tắt log HTTP rác để bớt tràn terminal
-        return
-
-def start_health_check_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    server.serve_forever()
 
 def clean_text(text: str) -> str:
     """Giải mã HTML Entities và loại bỏ triệt để các thẻ HTML rác gây lỗi Telegram API."""
@@ -46,10 +27,11 @@ def clean_text(text: str) -> str:
     clean = re.sub(r"</?[a-zA-Z0-9\-_:]+[^>]*>", "", decoded)
     return clean.strip()
 
+
 def format_daily_report(
     events: List[Dict], title_prefix: str = "BẢN TIN SỰ KIỆN MIỀN NAM"
 ) -> str:
-    """Định dạng bản tin sự kiện chuẩn 100% theo mẫu thiết kế."""
+    """Định dạng bản tin sự kiện chuẩn 100% theo mẫu thiết kế (Hiển thị ngày tháng linh hoạt)."""
     if not events:
         return f"<b>{title_prefix}</b>\n\nKhông có sự kiện nào được ghi nhận trong thời gian này."
 
@@ -73,7 +55,17 @@ def format_daily_report(
     for e in events:
         priority = e.get("priority", "TB")
         province = html.escape(clean_text(e.get("province", "Miền Nam")))
-        event_date = html.escape(clean_text(e.get("event_date", "Sắp diễn ra")))
+        
+        # XỬ LÝ HIỂN THỊ NGÀY THÁNG THÔNG MINH (Không bị cứng nhắc "Đang cập nhật")
+        raw_date_val = e.get("event_date", "")
+        if not raw_date_val or raw_date_val == "NULL" or "đang cập nhật" in str(raw_date_val).lower():
+            if priority == "CAO":
+                event_date = "Sắp có lịch"
+            else:
+                event_date = "Sắp diễn ra"
+        else:
+            event_date = html.escape(clean_text(raw_date_val))
+
         title = html.escape(clean_text(e.get("title", "")))
         location = html.escape(
             clean_text(e.get("location", "Đang cập nhật địa điểm"))
@@ -94,9 +86,11 @@ def format_daily_report(
         msg += "───────────────────\n\n"
 
     msg += (
-        "Gõ /tuannay để xem đầy đủ, /tinh &lt;tên tỉnh&gt;, /sukien &lt;từ khóa&gt;, hoặc /excel để tải báo cáo."
+        "Gõ /tuannay để xem đầy đủ, /tinh &lt;tên tỉnh&gt;, /sukien &lt;từ"
+        " khóa&gt;, hoặc /excel để tải báo cáo."
     )
     return msg
+
 
 def send_telegram_message(text: str, max_length: int = 3500) -> bool:
     """Gửi thông báo chủ động qua Telegram API (cho Scheduler/Main pipeline)."""
@@ -111,16 +105,17 @@ def send_telegram_message(text: str, max_length: int = 3500) -> bool:
         token = token[3:]
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    
     blocks = text.split("───────────────────\n\n")
     chunks = []
     current_chunk = ""
+
     for block in blocks:
         if len(current_chunk) + len(block) + 25 > max_length:
             chunks.append(current_chunk)
             current_chunk = block + "───────────────────\n\n"
         else:
             current_chunk += block + "───────────────────\n\n"
+
     if current_chunk:
         chunks.append(current_chunk)
 
@@ -143,7 +138,9 @@ def send_telegram_message(text: str, max_length: int = 3500) -> bool:
         except Exception as e:
             logger.error(f"Lỗi gửi tin Telegram: {e}")
             all_success = False
+
     return all_success
+
 
 async def send_split_messages(update: Update, text: str, max_length: int = 3500):
     """Phản hồi tin nhắn tương tác người dùng cho các Bot Commands."""
@@ -156,12 +153,14 @@ async def send_split_messages(update: Update, text: str, max_length: int = 3500)
     blocks = text.split("───────────────────\n\n")
     chunks = []
     current_chunk = ""
+
     for block in blocks:
         if len(current_chunk) + len(block) + 25 > max_length:
             chunks.append(current_chunk)
             current_chunk = block + "───────────────────\n\n"
         else:
             current_chunk += block + "───────────────────\n\n"
+
     if current_chunk:
         chunks.append(current_chunk)
 
@@ -171,42 +170,32 @@ async def send_split_messages(update: Update, text: str, max_length: int = 3500)
                 chunk, parse_mode="HTML", disable_web_page_preview=True
             )
 
+
 # ==========================================
 # CÁC LỆNH TƯƠNG TÁC TELEGRAM (BOT COMMANDS)
 # ==========================================
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /start: Chào mừng và hướng dẫn sử dụng nhanh."""
+    """Lệnh /start: Chào mừng và hướng dẫn sử dụng bot."""
     welcome_text = (
-        "🤖 <b>CHÀO MỪNG ĐẾN VỚI BOT SỰ KIỆN MIỀN NAM</b>\n\n"
-        "Hệ thống tự động tổng hợp và cung cấp thông tin sự kiện, hội thảo mới nhất.\n\n"
-        "📌 <b>Các lệnh hỗ trợ:</b>\n"
-        "• /homnay - Xem sự kiện diễn ra trong ngày hôm nay\n"
+        "🤖 <b>Chào mừng bạn đến với Southern Vietnam Event Agent!</b>\n\n"
+        "Bot tự động cập nhật và cung cấp thông tin các sự kiện, lễ hội, concert, triển lãm tại khu vực Miền Nam Việt Nam.\n\n"
+        "<b>Các lệnh bạn có thể sử dụng:</b>\n"
+        "• /homnay - Xem sự kiện diễn ra hôm nay\n"
         "• /tuannay - Xem sự kiện trong 7 ngày tới\n"
-        "• /tinh &lt;tên tỉnh&gt; - Tra cứu theo tỉnh/thành (VD: <code>/tinh Cần Thơ</code>)\n"
-        "• /sukien &lt;từ khóa&gt; - Tìm kiếm theo từ khóa (VD: <code>/sukien concert</code>)\n"
-        "• /excel - Tải file thống kê sự kiện (tuần/tháng)\n"
-        "• /help - Xem lại hướng dẫn chi tiết\n\n"
-        "Hãy chọn lệnh hoặc nhập cú pháp để bắt đầu nhé!"
+        "• /tinh &lt;tên tỉnh&gt; - Lọc sự kiện theo tỉnh/thành (VD: <code>/tinh Cần Thơ</code>)\n"
+        "• /sukien &lt;từ khóa&gt; - Tìm kiếm sự kiện theo từ khóa (VD: <code>/sukien pháo hoa</code>)\n"
+        "• /excel - Xuất báo cáo Excel 7 ngày tới\n"
+        "• /excel_thang - Xuất báo cáo Excel 30 ngày tới\n\n"
+        "Bản tin sự kiện sẽ được tự động gửi vào lúc 07:00 sáng hàng ngày!"
     )
     await update.message.reply_text(welcome_text, parse_mode="HTML")
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /help: Hướng dẫn chi tiết sử dụng bot."""
-    help_text = (
-        "📖 <b>HƯỚNG DẪN SỬ DỤNG BOT SỰ KIỆN</b>\n\n"
-        "1. <b>/homnay</b>: Lọc và liệt kê danh sách sự kiện đúng ngày hôm nay.\n"
-        "2. <b>/tuannay</b>: Liệt kê các sự kiện diễn ra trong 7 ngày tới.\n"
-        "3. <b>/tinh &lt;tên tỉnh&gt;</b>: Lọc sự kiện theo địa phương miền Nam.\n"
-        "4. <b>/sukien &lt;từ khóa&gt;</b>: Tìm kiếm sự kiện theo tên hoặc nội dung.\n"
-        "5. <b>/excel</b> hoặc <b>/excel_thang</b>: Nhận file Excel tổng hợp dữ liệu.\n"
-    )
-    await update.message.reply_text(help_text, parse_mode="HTML")
 
 async def cmd_homnay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lệnh /homnay: Lọc sự kiện diễn ra đúng ngày hôm nay."""
     init_db()
     today_str = datetime.now().strftime("%Y-%m-%d")
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -227,6 +216,7 @@ async def cmd_homnay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     events = [dict(r) for r in rows]
     report = format_daily_report(events, title_prefix="BẢN TIN SỰ KIỆN HÔM NAY")
     await send_split_messages(update, report)
+
 
 async def cmd_tuannay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lệnh /tuannay: Chỉ lọc các sự kiện thực sự diễn ra trong khoảng 7 ngày tới."""
@@ -255,6 +245,7 @@ async def cmd_tuannay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report = format_daily_report(events, title_prefix="BẢN TIN SỰ KIỆN 7 NGÀY TỚI")
     await send_split_messages(update, report)
 
+
 async def cmd_tinh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lệnh /tinh <tên tỉnh>: Lọc sự kiện theo tỉnh/thành miền Nam."""
     init_db()
@@ -266,6 +257,7 @@ async def cmd_tinh(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     province_query = " ".join(context.args).strip()
+    safe_province = html.escape(province_query)
     today_str = datetime.now().strftime("%Y-%m-%d")
 
     conn = sqlite3.connect(DB_PATH)
@@ -280,7 +272,7 @@ async def cmd_tinh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not rows:
         await update.message.reply_text(
-            f"Không tìm thấy sự kiện nào sắp tới tại tỉnh: <b>{province_query}</b>",
+            f"Không tìm thấy sự kiện nào sắp tới tại tỉnh: <b>{safe_province}</b>",
             parse_mode="HTML",
         )
         return
@@ -290,6 +282,7 @@ async def cmd_tinh(update: Update, context: ContextTypes.DEFAULT_TYPE):
         events, title_prefix=f"SỰ KIỆN TẠI {province_query.upper()}"
     )
     await send_split_messages(update, report)
+
 
 async def cmd_sukien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lệnh /sukien <từ khóa>: Tìm kiếm sự kiện theo từ khóa."""
@@ -302,6 +295,8 @@ async def cmd_sukien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     keyword = " ".join(context.args).strip()
+    safe_keyword = html.escape(keyword)
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -314,7 +309,7 @@ async def cmd_sukien(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not rows:
         await update.message.reply_text(
-            f"Không tìm thấy sự kiện chứa từ khóa: <b>{keyword}</b>",
+            f'Không tìm thấy sự kiện chứa từ khóa: <b>"{safe_keyword}"</b>',
             parse_mode="HTML",
         )
         return
@@ -325,16 +320,18 @@ async def cmd_sukien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await send_split_messages(update, report)
 
+
 # ==========================================
 # CHỨC NĂNG XUẤT EXCEL THEO TUẦN / THÁNG
 # ==========================================
-
 async def cmd_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lệnh /excel [tuan/thang]: Xuất danh sách sự kiện ra file Excel và gửi qua Telegram."""
     init_db()
-    time_frame = "tuan"
-    if context.args and context.args[0].lower() in ["thang", "month", "30"]:
-        time_frame = "thang"
+    time_frame = (
+        "tuan"
+        if context.args and context.args[0].lower() in ["thang", "month", "30"]
+        else "tuan"
+    )
 
     today = datetime.now()
     today_str = today.strftime("%Y-%m-%d")
@@ -350,12 +347,12 @@ async def cmd_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn = sqlite3.connect(DB_PATH)
     query = """
-        SELECT priority as 'Mức Ưu Tiên', event_date as 'Ngày Diễn Ra', province as 'Tỉnh/Thành', 
-               title as 'Tên Sự Kiện', location as 'Địa Điểm Chi Tiết', scale as 'Quy Mô', 
-               source_name as 'Nguồn Báo', link as 'Đường Link Gốc'
-        FROM events 
-        WHERE raw_date >= ? AND raw_date <= ? 
-        ORDER BY raw_date ASC
+    SELECT priority as 'Mức Ưu Tiên', event_date as 'Ngày Diễn Ra', province as 'Tỉnh/Thành', 
+           title as 'Tên Sự Kiện', location as 'Địa Điểm Chi Tiết', scale as 'Quy Mô', 
+           source_name as 'Nguồn Báo', link as 'Đường Link Gốc'
+    FROM events 
+    WHERE raw_date >= ? AND raw_date <= ? 
+    ORDER BY raw_date ASC
     """
     df = pd.read_sql_query(query, conn, params=(today_str, end_date))
     conn.close()
@@ -376,22 +373,24 @@ async def cmd_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         df.to_excel(writer, sheet_name="Danh Sách Sự Kiện", index=False)
 
     caption_text = (
-        f"📊 <b>BÁO CÁO XUẤT EXCEL SỰ KIỆN MIỀN NAM</b>\n\n"
-        f"🗓️ Khoảng thời gian: <b>{period_title}</b>\n"
-        f"📈 Tổng số ghi nhận: <b>{len(df)} sự kiện</b>"
+        f"📊 <b>BÁO CÁO XUẤT EXCEL SỰ KIỆN MIỀN NAM</b>\n\n🗓️ Khoảng thời gian:"
+        f" <b>{period_title}</b>\n📈 Tổng số ghi nhận: <b>{len(df)} sự kiện</b>"
     )
 
-    await update.message.reply_document(
-        document=open(excel_file_path, "rb"),
-        filename=os.path.basename(excel_file_path),
-        caption=caption_text,
-        parse_mode="HTML",
-    )
+    with open(excel_file_path, "rb") as f:
+        await update.message.reply_document(
+            document=f,
+            filename=os.path.basename(excel_file_path),
+            caption=caption_text,
+            parse_mode="HTML",
+        )
+
 
 async def cmd_excel_thang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lệnh tắt /excel_thang để xuất nhanh Excel theo tháng."""
     context.args = ["thang"]
     await cmd_excel(update, context)
+
 
 def send_daily_event_report():
     """Hàm tự động gửi báo cáo sự kiện hàng ngày qua Telegram."""
@@ -409,12 +408,17 @@ def send_daily_event_report():
     conn.close()
 
     if not rows:
-        send_telegram_message("<b>BẢN TIN SỰ KIỆN HÔM NAY</b>\n\nHôm nay chưa ghi nhận sự kiện mới nào.")
+        send_telegram_message(
+            "<b>BẢN TIN SỰ KIỆN HÔM NAY</b>\n\nHôm nay chưa ghi nhận sự kiện mới nào."
+        )
         return
 
     events = [dict(r) for r in rows]
-    report = format_daily_report(events, title_prefix="BẢN TIN SỰ KIỆN MIỀN NAM")
+    report = format_daily_report(
+        events, title_prefix="BẢN TIN SỰ KIỆN MIỀN NAM"
+    )
     send_telegram_message(report)
+
 
 def start_bot_polling():
     """Khởi chạy Bot lắng nghe 24/7 toàn bộ các lệnh."""
@@ -428,9 +432,8 @@ def start_bot_polling():
 
     app = ApplicationBuilder().token(token).build()
 
-    # Đăng ký đầy đủ các Handler lệnh tương tác
+    # Đăng ký các Handler lệnh
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("homnay", cmd_homnay))
     app.add_handler(CommandHandler("tuannay", cmd_tuannay))
     app.add_handler(CommandHandler("tinh", cmd_tinh))
@@ -439,6 +442,7 @@ def start_bot_polling():
     app.add_handler(CommandHandler("excel_thang", cmd_excel_thang))
 
     logger.info(
-        "🤖 Bot Telegram đang chạy lắng nghe các lệnh (/start, /help, /homnay, /tuannay, /tinh, /sukien, /excel, /excel_thang)..."
+        "🤖 Bot Telegram đang chạy lắng nghe các lệnh (/start, /homnay, /tuannay, /tinh,"
+        " /sukien, /excel, /excel_thang)..."
     )
     app.run_polling()

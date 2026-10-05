@@ -169,9 +169,9 @@ def extract_scale(text: str) -> str:
         scale_parts.append(f"~{people_match.group(1)}")
     elif any(
         k in text_lower
-        for k in ["quy mô lớn", "cấp tỉnh", "quốc gia", "hoành tráng"]
+        for k in ["quy mô lớn", "cấp tỉnh", "quốc gia", "hoành tráng", "sân vận động", "kỷ niệm", "25 năm", "15 năm", "20 năm"]
     ):
-        scale_parts.append("Quy mô lớn")
+        scale_parts.append("Concert / Sự kiện quy mô lớn")
 
     if "bắn pháo hoa" in text_lower or "pháo hoa" in text_lower:
         scale_parts.append("có bắn pháo hoa")
@@ -200,7 +200,10 @@ def parse_priority(text: str) -> str:
         "hàng vạn", 
         "vạn người", 
         "chục ngàn", 
-        "chục nghìn"
+        "chục nghìn",
+        "sân vận động",
+        "25 năm",
+        "20 năm"
     ]
     if any(kw in text_lower for kw in high_keywords):
         return "CAO"
@@ -290,23 +293,31 @@ def process_articles(raw_articles: List[Dict]) -> List[Dict]:
                 f"🤖 Đang gọi AI Gemini trích xuất bài viết: {art['title']}"
             )
             ai_data = extract_event_with_ai(art["title"], summary_clean)
-            if (
-                ai_data
-                and ai_data.get("raw_date")
-                and ai_data.get("raw_date") != "NULL"
-            ):
+            if ai_data:
                 event_date_str = ai_data.get("event_date")
                 iso_date = ai_data.get("raw_date")
                 province = ai_data.get("province", "TPHCM")
                 location = ai_data.get("location", "Khu vực trung tâm")
                 scale = ai_data.get("scale", "")
-                # Đảm bảo dùng hàm parse_priority thông minh mới cho cả kết quả AI trả về nếu scale có số lớn
+                
                 combined_text = f"{art['title']} {summary_clean} {scale}"
                 priority = parse_priority(combined_text)
 
-        # Nếu cả RegEx lẫn AI đều không xác định được ngày cụ thể -> Bỏ qua bài này
-        if not iso_date or iso_date == "NULL":
+        # 3. ĐIỀU KIỆN TIÊN QUYẾT: BẮT BUỘC PHẢI CÓ NGÀY THÁNG RÕ RÀNG MỚI LƯU VÀO DB
+        if not iso_date or iso_date == "NULL" or not event_date_str or event_date_str == "NULL":
             continue
+
+        if not province:
+            province = extract_province(full_text) or "TPHCM"
+
+        if not location:
+            location = extract_location(full_text, province)
+
+        if not scale:
+            scale = extract_scale(full_text)
+
+        if not priority:
+            priority = parse_priority(full_text)
 
         event = {
             "title": art["title"],
