@@ -1,4 +1,7 @@
 from datetime import time
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from zoneinfo import ZoneInfo
 
 from telegram.ext import (
@@ -173,6 +176,28 @@ async def send_daily_bulletin(context: ContextTypes.DEFAULT_TYPE):
             f"Không thể gửi bản tin: {error}"
         )
 
+def start_health_server():
+    port = int(os.getenv("PORT", "10000"))
+
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"OK")
+
+        def log_message(self, format, *args):
+            return
+
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+
+    thread = threading.Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+
+    print(f"Health server is running on port {port}")
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
@@ -259,6 +284,8 @@ def main():
         "Daily bulletin scheduled at "
         "07:00 Vietnam time."
     )
+
+    start_health_server()
 
     app.run_polling()
 
