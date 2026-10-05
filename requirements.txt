@@ -2,7 +2,8 @@ feedparser
 requests
 beautifulsoup4
 python-dotenv
-python-telegram-bot
+python-telegram-bot[job-queue]
 pandas
 google-genai
 google-generativeai
+openpyxl

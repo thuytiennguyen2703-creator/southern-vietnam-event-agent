@@ -20,4 +20,4 @@ COPY . .
 RUN mkdir -p data
 
 # 7. Lệnh khởi chạy Bot Telegram 24/7
-CMD ["python", "main.py"]
+CMD ["python", "run_bot.py"]

@@ -1,86 +1,161 @@
-import logging
-import urllib.request
+import html
+import re
+from urllib.parse import urljoin
+
 import feedparser
 import requests
-from typing import List, Dict
-from src.config import RSS_SOURCES
-from src.bot_handler import send_telegram_message
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+from bs4 import BeautifulSoup
 
 
-def fetch_single_source(source: Dict) -> tuple[List[Dict], str | None]:
-    """Thu thập bài viết từ một nguồn RSS với cơ chế dự phòng hai lớp (requests + urllib)"""
-    articles = []
-    source_name = source["name"]
-    url = source["url"]
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    )
+}
 
-    content = None
-    error_msg = None
 
-    # Lớp 1: Dùng requests
+def fetch_url(url: str) -> bytes:
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=20,
+    )
+    response.raise_for_status()
+    return response.content
+
+
+def clean_text(text: str) -> str:
+    if not text:
+        return ""
+
+    text = html.unescape(text)
+    text = re.sub(r"<[^>]+>", " ", text)
+
+    return " ".join(text.split())
+
+
+def extract_article_content(url: str) -> str:
+    if not url:
+        return ""
+
     try:
-        response = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        if response.status_code == 200:
-            content = response.content
-        else:
-            error_msg = f"Mã lỗi HTTP {response.status_code}"
-    except Exception as e:
-        # Lớp 2: Dự phòng dùng urllib nếu gặp lỗi HeaderParsingError trên Python 3.14
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                content = resp.read()
-        except Exception as ex:
-            error_msg = f"Lỗi kết nối: {str(ex)}"
+        content = fetch_url(url)
+    except requests.RequestException:
+        return ""
 
-    if error_msg or not content:
-        return [], error_msg or "Không tải được nội dung"
+    soup = BeautifulSoup(content, "html.parser")
 
+    selectors = [
+        "article",
+        "[itemprop='articleBody']",
+        ".article-content",
+        ".article__body",
+        ".detail-content",
+        ".detail__content",
+        ".content-detail",
+        ".news-content",
+        ".news-content-detail",
+    ]
+
+    for selector in selectors:
+        element = soup.select_one(selector)
+
+        if element:
+            text = element.get_text(" ", strip=True)
+
+            if len(text) >= 200:
+                return clean_text(text)
+
+    paragraphs = soup.find_all("p")
+
+    text = " ".join(
+        paragraph.get_text(" ", strip=True)
+        for paragraph in paragraphs
+    )
+
+    return clean_text(text)
+
+
+def scrape_rss_source(source: dict) -> list[dict]:
+    content = fetch_url(source["url"])
     feed = feedparser.parse(content)
 
+    articles = []
+
     for entry in feed.entries:
-        title = getattr(entry, "title", "")
-        link = getattr(entry, "link", "")
-        summary = getattr(entry, "summary", getattr(entry, "description", ""))
-        published = getattr(entry, "published", getattr(entry, "updated", ""))
+        title = clean_text(entry.get("title"))
+        url = clean_text(entry.get("link"))
+        summary = clean_text(entry.get("summary"))
+        published = clean_text(entry.get("published"))
 
-        if title and link:
-            articles.append({
-                "title": title.strip(),
-                "link": link.strip(),
-                "summary": summary,
-                "published": published,
-                "source_name": source_name
-            })
+        if not title or not url:
+            continue
 
-    return articles, None
+        article_content = extract_article_content(url)
+
+        articles.append({
+            "source_name": source["name"],
+            "source_url": source["url"],
+            "province": source.get("province"),
+            "title": title,
+            "url": url,
+            "summary": summary,
+            "content": article_content,
+            "published": published,
+        })
+
+    return articles
 
 
-def fetch_all_sources() -> List[Dict]:
-    """Thu thập dữ liệu từ tất cả các nguồn và tự động phát cảnh báo nếu nguồn hỏng"""
-    all_articles = []
-    failed_sources = []
+def scrape_html_source(source: dict) -> list[dict]:
+    content = fetch_url(source["url"])
+    soup = BeautifulSoup(content, "html.parser")
 
-    for source in RSS_SOURCES:
-        logging.info(f"Đang cào dữ liệu từ: {source['name']}")
-        articles, error = fetch_single_source(source)
+    articles = []
+    seen_urls = set()
 
-        if error:
-            logging.error(f"❌ Nguồn '{source['name']}' bị hỏng: {error}")
-            failed_sources.append({"name": source["name"], "url": source["url"], "error": error})
-        else:
-            all_articles.extend(articles)
+    for link in soup.find_all("a", href=True):
+        title = clean_text(link.get_text(" ", strip=True))
+        url = clean_text(link.get("href"))
 
-    # Tự động gửi cảnh báo về Telegram nếu có nguồn hỏng
-    if failed_sources:
-        alert_text = "⚠️ <b>CẢNH BÁO: PHÁT HIỆN NGUỒN THU THẬP BỊ HỎNG!</b> ⚠️\n\n"
-        for fs in failed_sources:
-            alert_text += f"❌ <b>Nguồn:</b> {fs['name']}\n"
-            alert_text += f"🔗 <b>URL:</b> {fs['url']}\n"
-            alert_text += f"🛠️ <b>Chi tiết lỗi:</b> <code>{fs['error']}</code>\n"
-            alert_text += "───────────────────\n"
-        
-        send_telegram_message(alert_text)
+        if not title or not url:
+            continue
 
-    return all_articles
+        url = urljoin(source["url"], url)
+
+        if url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+
+        if url.startswith("#"):
+            continue
+
+        articles.append({
+            "source_name": source["name"],
+            "source_url": source["url"],
+            "province": source.get("province"),
+            "title": title,
+            "url": url,
+            "summary": "",
+            "content": "",
+            "published": "",
+        })
+
+    return articles
+
+
+def scrape_source(source: dict) -> list[dict]:
+    source_type = source.get("type")
+
+    if source_type == "rss":
+        return scrape_rss_source(source)
+
+    if source_type == "html":
+        return scrape_html_source(source)
+
+    raise ValueError(
+        f"Unsupported source type: {source_type}"
+    )

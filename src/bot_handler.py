@@ -1,448 +1,472 @@
-import html
-import logging
-import os
-import re
-import sqlite3
-from datetime import datetime, timedelta
-from typing import Dict, List
-import pandas as pd
-import requests
+from datetime import datetime
+
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from src.config import DB_PATH, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-from src.database import init_db
+from telegram.ext import ContextTypes
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - [%(name)s] %(message)s",
+from src.database import (
+    get_events_today,
+    get_upcoming_events,
+    get_events_by_province,
+    search_events,
 )
-logger = logging.getLogger("bot_handler")
 
+import os
 
-def clean_text(text: str) -> str:
-    """Giải mã HTML Entities và loại bỏ triệt để các thẻ HTML rác gây lỗi Telegram API."""
-    if not text:
-        return ""
-    decoded = html.unescape(html.unescape(text))
-    clean = re.sub(r"</?[a-zA-Z0-9\-_:]+[^>]*>", "", decoded)
-    return clean.strip()
+from src.database import export_events_to_excel
 
+# ============================================================
+# FORMAT HELPERS
+# ============================================================
 
-def format_daily_report(
-    events: List[Dict], title_prefix: str = "BẢN TIN SỰ KIỆN MIỀN NAM"
+def format_date_range(
+    start_time: str | None,
+    end_time: str | None,
 ) -> str:
-    """Định dạng bản tin sự kiện chuẩn 100% theo mẫu thiết kế (Hiển thị ngày tháng linh hoạt)."""
-    if not events:
-        return f"<b>{title_prefix}</b>\n\nKhông có sự kiện nào được ghi nhận trong thời gian này."
+    """
+    Format thời gian ngắn gọn:
+    17–18/10
+    17/10
+    Chưa xác định
+    """
 
-    now = datetime.now()
-    days_vn = [
-        "Thứ Hai",
-        "Thứ Ba",
-        "Thứ Tư",
-        "Thứ Năm",
-        "Thứ Sáu",
-        "Thứ Bảy",
-        "Chủ Nhật",
-    ]
-    day_name = days_vn[now.weekday()]
-    date_str = now.strftime("%d/%m/%Y")
-    high_priority_count = sum(1 for e in events if e.get("priority") == "CAO")
+    if not start_time:
+        return "Chưa xác định"
 
-    msg = f"<b>{title_prefix} — 07:00 {day_name} {date_str}</b>\n\n"
-    msg += f"<b>Tổng số: {len(events)} sự kiện ({high_priority_count} quy mô lớn)</b>\n\n"
+    try:
+        start = datetime.fromisoformat(start_time)
 
-    for e in events:
-        priority = e.get("priority", "TB")
-        province = html.escape(clean_text(e.get("province", "Miền Nam")))
-        
-        # XỬ LÝ HIỂN THỊ NGÀY THÁNG THÔNG MINH (Không bị cứng nhắc "Đang cập nhật")
-        raw_date_val = e.get("event_date", "")
-        if not raw_date_val or raw_date_val == "NULL" or "đang cập nhật" in str(raw_date_val).lower():
-            if priority == "CAO":
-                event_date = "Sắp có lịch"
-            else:
-                event_date = "Sắp diễn ra"
-        else:
-            event_date = html.escape(clean_text(raw_date_val))
+        if not end_time:
+            return start.strftime("%d/%m")
 
-        title = html.escape(clean_text(e.get("title", "")))
-        location = html.escape(
-            clean_text(e.get("location", "Đang cập nhật địa điểm"))
-        )
-        scale = html.escape(clean_text(e.get("scale", "")))
-        source_name = html.escape(clean_text(e.get("source_name", "Nguồn")))
-        link = e.get("link", "")
+        end = datetime.fromisoformat(end_time)
 
-        msg += f"<b>[{priority}] {event_date} · {province}</b>\n\n"
-        msg += f"<b>{title}</b>\n\n"
-        msg += f"Địa điểm: {location}\n\n"
-        if scale:
-            msg += f"Quy mô: {scale}\n\n"
-        if link:
-            msg += f'Nguồn: <a href="{link}">{source_name}</a>\n\n'
-        else:
-            msg += f"Nguồn: {source_name}\n\n"
-        msg += "───────────────────\n\n"
+        if start.date() == end.date():
+            return start.strftime("%d/%m")
 
-    msg += (
-        "Gõ /tuannay để xem đầy đủ, /tinh &lt;tên tỉnh&gt;, /sukien &lt;từ"
-        " khóa&gt;, hoặc /excel để tải báo cáo."
-    )
-    return msg
+        if start.year == end.year and start.month == end.month:
+            return f"{start.day:02d}–{end.day:02d}/{start.month:02d}"
 
-
-def send_telegram_message(text: str, max_length: int = 3500) -> bool:
-    """Gửi thông báo chủ động qua Telegram API (cho Scheduler/Main pipeline)."""
-    token = str(TELEGRAM_BOT_TOKEN).strip() if TELEGRAM_BOT_TOKEN else ""
-    chat_id = str(TELEGRAM_CHAT_ID).strip() if TELEGRAM_CHAT_ID else ""
-
-    if not token or not chat_id:
-        logger.error("Chưa cấu hình TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID trong .env")
-        return False
-
-    if token.startswith("bot"):
-        token = token[3:]
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    blocks = text.split("───────────────────\n\n")
-    chunks = []
-    current_chunk = ""
-
-    for block in blocks:
-        if len(current_chunk) + len(block) + 25 > max_length:
-            chunks.append(current_chunk)
-            current_chunk = block + "───────────────────\n\n"
-        else:
-            current_chunk += block + "───────────────────\n\n"
-
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    all_success = True
-    for chunk in chunks:
-        if not chunk.strip():
-            continue
-        payload = {
-            "chat_id": chat_id,
-            "text": chunk,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            res_data = response.json()
-            if not res_data.get("ok"):
-                logger.error(f"Lỗi Telegram API: {res_data.get('description')}")
-                all_success = False
-        except Exception as e:
-            logger.error(f"Lỗi gửi tin Telegram: {e}")
-            all_success = False
-
-    return all_success
-
-
-async def send_split_messages(update: Update, text: str, max_length: int = 3500):
-    """Phản hồi tin nhắn tương tác người dùng cho các Bot Commands."""
-    if len(text) <= max_length:
-        await update.message.reply_text(
-            text, parse_mode="HTML", disable_web_page_preview=True
-        )
-        return
-
-    blocks = text.split("───────────────────\n\n")
-    chunks = []
-    current_chunk = ""
-
-    for block in blocks:
-        if len(current_chunk) + len(block) + 25 > max_length:
-            chunks.append(current_chunk)
-            current_chunk = block + "───────────────────\n\n"
-        else:
-            current_chunk += block + "───────────────────\n\n"
-
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    for chunk in chunks:
-        if chunk.strip():
-            await update.message.reply_text(
-                chunk, parse_mode="HTML", disable_web_page_preview=True
+        if start.year == end.year:
+            return (
+                f"{start.day:02d}/{start.month:02d}"
+                f"–{end.day:02d}/{end.month:02d}"
             )
 
-
-# ==========================================
-# CÁC LỆNH TƯƠNG TÁC TELEGRAM (BOT COMMANDS)
-# ==========================================
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /start: Chào mừng và hướng dẫn sử dụng bot."""
-    welcome_text = (
-        "🤖 <b>Chào mừng bạn đến với Southern Vietnam Event Agent!</b>\n\n"
-        "Bot tự động cập nhật và cung cấp thông tin các sự kiện, lễ hội, concert, triển lãm tại khu vực Miền Nam Việt Nam.\n\n"
-        "<b>Các lệnh bạn có thể sử dụng:</b>\n"
-        "• /homnay - Xem sự kiện diễn ra hôm nay\n"
-        "• /tuannay - Xem sự kiện trong 7 ngày tới\n"
-        "• /tinh &lt;tên tỉnh&gt; - Lọc sự kiện theo tỉnh/thành (VD: <code>/tinh Cần Thơ</code>)\n"
-        "• /sukien &lt;từ khóa&gt; - Tìm kiếm sự kiện theo từ khóa (VD: <code>/sukien pháo hoa</code>)\n"
-        "• /excel - Xuất báo cáo Excel 7 ngày tới\n"
-        "• /excel_thang - Xuất báo cáo Excel 30 ngày tới\n\n"
-        "Bản tin sự kiện sẽ được tự động gửi vào lúc 07:00 sáng hàng ngày!"
-    )
-    await update.message.reply_text(welcome_text, parse_mode="HTML")
-
-
-async def cmd_homnay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /homnay: Lọc sự kiện diễn ra đúng ngày hôm nay."""
-    init_db()
-    today_str = datetime.now().strftime("%Y-%m-%d")
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM events WHERE raw_date = ? ORDER BY id DESC LIMIT 10",
-        (today_str,),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        await update.message.reply_text(
-            "<b>BẢN TIN SỰ KIỆN HÔM NAY</b>\n\nHôm nay không có sự kiện nào diễn ra.\nGõ /tuannay để xem danh sách 7 ngày tới.",
-            parse_mode="HTML",
+        return (
+            f"{start.strftime('%d/%m/%Y')}"
+            f"–{end.strftime('%d/%m/%Y')}"
         )
-        return
 
-    events = [dict(r) for r in rows]
-    report = format_daily_report(events, title_prefix="BẢN TIN SỰ KIỆN HÔM NAY")
-    await send_split_messages(update, report)
+    except (ValueError, TypeError):
+        return "Chưa xác định"
 
 
-async def cmd_tuannay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /tuannay: Chỉ lọc các sự kiện thực sự diễn ra trong khoảng 7 ngày tới."""
-    init_db()
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    next_7_days = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM events WHERE raw_date >= ? AND raw_date <= ? ORDER BY raw_date ASC, id DESC LIMIT 15",
-        (today_str, next_7_days),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        await update.message.reply_text(
-            "<b>BẢN TIN SỰ KIỆN 7 NGÀY TỚI</b>\n\nHiện tại không có sự kiện nào diễn ra trong 7 ngày tới.",
-            parse_mode="HTML",
-        )
-        return
-
-    events = [dict(r) for r in rows]
-    report = format_daily_report(events, title_prefix="BẢN TIN SỰ KIỆN 7 NGÀY TỚI")
-    await send_split_messages(update, report)
-
-
-async def cmd_tinh(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /tinh <tên tỉnh>: Lọc sự kiện theo tỉnh/thành miền Nam."""
-    init_db()
-    if not context.args:
-        await update.message.reply_text(
-            "Vui lòng nhập tên tỉnh. Ví dụ: <code>/tinh Cần Thơ</code> hoặc <code>/tinh Tây Ninh</code>",
-            parse_mode="HTML",
-        )
-        return
-
-    province_query = " ".join(context.args).strip()
-    safe_province = html.escape(province_query)
-    today_str = datetime.now().strftime("%Y-%m-%d")
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM events WHERE province LIKE ? AND raw_date >= ? ORDER BY raw_date ASC LIMIT 10",
-        (f"%{province_query}%", today_str),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        await update.message.reply_text(
-            f"Không tìm thấy sự kiện nào sắp tới tại tỉnh: <b>{safe_province}</b>",
-            parse_mode="HTML",
-        )
-        return
-
-    events = [dict(r) for r in rows]
-    report = format_daily_report(
-        events, title_prefix=f"SỰ KIỆN TẠI {province_query.upper()}"
-    )
-    await send_split_messages(update, report)
-
-
-async def cmd_sukien(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /sukien <từ khóa>: Tìm kiếm sự kiện theo từ khóa."""
-    init_db()
-    if not context.args:
-        await update.message.reply_text(
-            "Vui lòng nhập từ khóa. Ví dụ: <code>/sukien pháo hoa</code> hoặc <code>/sukien concert</code>",
-            parse_mode="HTML",
-        )
-        return
-
-    keyword = " ".join(context.args).strip()
-    safe_keyword = html.escape(keyword)
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM events WHERE (title LIKE ? OR location LIKE ?) ORDER BY id DESC LIMIT 10",
-        (f"%{keyword}%", f"%{keyword}%"),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        await update.message.reply_text(
-            f'Không tìm thấy sự kiện chứa từ khóa: <b>"{safe_keyword}"</b>',
-            parse_mode="HTML",
-        )
-        return
-
-    events = [dict(r) for r in rows]
-    report = format_daily_report(
-        events, title_prefix=f'TÌM KIẾM SỰ KIỆN: "{keyword}"'
-    )
-    await send_split_messages(update, report)
-
-
-# ==========================================
-# CHỨC NĂNG XUẤT EXCEL THEO TUẦN / THÁNG
-# ==========================================
-async def cmd_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /excel [tuan/thang]: Xuất danh sách sự kiện ra file Excel và gửi qua Telegram."""
-    init_db()
-    time_frame = (
-        "tuan"
-        if context.args and context.args[0].lower() in ["thang", "month", "30"]
-        else "tuan"
-    )
-
-    today = datetime.now()
-    today_str = today.strftime("%Y-%m-%d")
-
-    if time_frame == "thang":
-        end_date = (today + timedelta(days=30)).strftime("%Y-%m-%d")
-        period_title = "30 NGÀY TỚI (THÁNG)"
-        filename_prefix = "Su_Kien_Theo_Thang"
-    else:
-        end_date = (today + timedelta(days=7)).strftime("%Y-%m-%d")
-        period_title = "7 NGÀY TỚI (TUẦN)"
-        filename_prefix = "Su_Kien_Theo_Tuan"
-
-    conn = sqlite3.connect(DB_PATH)
-    query = """
-    SELECT priority as 'Mức Ưu Tiên', event_date as 'Ngày Diễn Ra', province as 'Tỉnh/Thành', 
-           title as 'Tên Sự Kiện', location as 'Địa Điểm Chi Tiết', scale as 'Quy Mô', 
-           source_name as 'Nguồn Báo', link as 'Đường Link Gốc'
-    FROM events 
-    WHERE raw_date >= ? AND raw_date <= ? 
-    ORDER BY raw_date ASC
+def format_priority(event: dict) -> str:
     """
-    df = pd.read_sql_query(query, conn, params=(today_str, end_date))
-    conn.close()
+    Quy đổi priority sang nhãn ngắn gọn.
+    """
 
-    if df.empty:
+    if event.get("priority") == "high":
+        return "CAO"
+
+    return "THƯỜNG"
+
+
+def format_scale(event: dict) -> str | None:
+    """
+    Format quy mô:
+    ~20.000 người
+    ~20.000 người · có bắn pháo hoa
+    """
+
+    attendance = event.get("expected_attendance")
+    fireworks = event.get("fireworks")
+
+    parts = []
+
+    if attendance:
+        parts.append(
+            f"~{attendance:,} người"
+        )
+
+    if fireworks:
+        parts.append(
+            "có bắn pháo hoa"
+        )
+
+    if not parts:
+        return None
+
+    return " · ".join(parts)
+
+
+def format_event(event: dict) -> str:
+    """
+    Format một event theo format bản tin.
+    """
+
+    priority = format_priority(event)
+
+    date_text = format_date_range(
+        event.get("start_time"),
+        event.get("end_time"),
+    )
+
+    province = event.get("province") or "Chưa xác định"
+
+    name = event.get(
+        "name",
+        "Không có tên",
+    )
+
+    location = event.get("location")
+
+    lines = []
+
+    # Dòng 1
+    lines.append(
+        f"<b>[{priority}] {date_text} · {province}</b>"
+    )
+
+    # Tên sự kiện
+    lines.append(
+        f"<b>{name}</b>"
+    )
+
+    # Địa điểm
+    if location:
+        lines.append(
+            f"Địa điểm: {location}"
+        )
+    else:
+        lines.append(
+            "Địa điểm: Chưa xác định"
+        )
+
+    # Quy mô
+    scale = format_scale(event)
+
+    if scale:
+        lines.append(
+            f"Quy mô: {scale}"
+        )
+
+    # Nguồn
+    source_url = event.get("source_url")
+
+    if source_url:
+        lines.append(
+            f'Nguồn: <a href="{source_url}">Xem bài gốc</a>'
+        )
+
+    return "\n".join(lines)
+
+
+def format_news_header(
+    events: list[dict],
+    title: str = "BẢN TIN SỰ KIỆN MIỀN NAM",
+) -> str:
+    """
+    Header cho bản tin.
+    """
+
+    now = datetime.now()
+
+    weekday_names = {
+        0: "Thứ Hai",
+        1: "Thứ Ba",
+        2: "Thứ Tư",
+        3: "Thứ Năm",
+        4: "Thứ Sáu",
+        5: "Thứ Bảy",
+        6: "Chủ Nhật",
+    }
+
+    weekday = weekday_names[now.weekday()]
+
+    date_text = now.strftime(
+        "%d/%m/%Y"
+    )
+
+    high_count = sum(
+        1
+        for event in events
+        if event.get("priority") == "high"
+    )
+
+    if high_count:
+        count_text = (
+            f"{len(events)} sự kiện "
+            f"({high_count} quy mô lớn)"
+        )
+    else:
+        count_text = (
+            f"{len(events)} sự kiện"
+        )
+
+    return (
+        f"<b>{title} — {weekday} {date_text}</b>\n"
+        f"{'7 ngày tới: ' if title == 'BẢN TIN SỰ KIỆN MIỀN NAM' else ''}"
+        f"{count_text}"
+    )
+
+
+def format_event_list(
+    events: list[dict],
+    title: str | None = None,
+    include_header: bool = False,
+) -> str:
+    """
+    Format danh sách event.
+
+    include_header=True:
+        thêm header bản tin miền Nam.
+
+    title:
+        tiêu đề riêng cho /homnay, /tinh, /sukien...
+    """
+
+    if not events:
+
+        if include_header:
+            return (
+                format_news_header(events)
+                + "\n\n"
+                "Không có sự kiện phù hợp."
+            )
+
+        return (
+            f"<b>{title or 'KẾT QUẢ'}</b>\n\n"
+            "Không tìm thấy sự kiện phù hợp."
+        )
+
+    sections = []
+
+    if include_header:
+        sections.append(
+            format_news_header(events)
+        )
+
+    elif title:
+        sections.append(
+            f"<b>{title}</b>"
+        )
+
+    for event in events:
+        sections.append(
+            format_event(event)
+        )
+
+    return "\n\n".join(sections)
+
+
+# ============================================================
+# COMMANDS
+# ============================================================
+
+async def start_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    message = (
+        "👋 <b>Event Bot</b>\n\n"
+        "Bot giúp tra cứu các sự kiện, lễ hội "
+        "và sự kiện đông người tại khu vực phía Nam.\n\n"
+        "📅 <b>/homnay</b> — Sự kiện hôm nay\n"
+        "📆 <b>/tuannay</b> — Sự kiện 7 ngày tới\n"
+        "📍 <b>/tinh &lt;tỉnh/thành&gt;</b> — Theo tỉnh/thành\n"
+        "🔎 <b>/sukien &lt;từ khóa&gt;</b> — Tìm kiếm sự kiện\n"
+        "📊 <b>/excel tuan</b> hoặc <b>/excel thang</b> — Xuất danh sách sự kiện ra Excel\n\n"
+        "Ví dụ:\n"
+        "<code>/tinh An Giang</code>\n"
+        "<code>/sukien lễ hội</code>"
+    )
+
+    await update.message.reply_text(
+        message,
+        parse_mode="HTML",
+    )
+
+
+async def help_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    message = (
+        "<b>Các lệnh có thể sử dụng</b>\n\n"
+        "📅 <code>/homnay</code>\n"
+        "Xem các sự kiện diễn ra hôm nay.\n\n"
+        "📆 <code>/tuannay</code>\n"
+        "Xem các sự kiện trong 7 ngày tới.\n\n"
+        "📍 <code>/tinh An Giang</code>\n"
+        "Xem sự kiện theo tỉnh/thành.\n\n"
+        "🔎 <code>/sukien lễ hội</code>\n"
+        "Tìm kiếm theo tên, tỉnh hoặc địa điểm.\n\n"
+        "📊 <code>/excel tuan</code> hoặc <code>/excel thang</code>\n"
+        "Xuất danh sách sự kiện ra Excel.\n\n"
+    )
+
+    await update.message.reply_text(
+        message,
+        parse_mode="HTML",
+    )
+
+
+async def today_command(update, context):
+    events = get_events_today()
+    message = format_event_list(events, include_header=True)
+    await update.message.reply_text(
+        message,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+
+
+async def week_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    events = get_upcoming_events(7)
+
+    message = format_event_list(
+        events,
+        include_header=True,
+    )
+
+    await update.message.reply_text(
+        message,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+
+
+async def province_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    if not context.args:
         await update.message.reply_text(
-            f"Không có dữ liệu sự kiện nào trong <b>{period_title}</b> để xuất file Excel.",
+            "⚠️ Vui lòng nhập tỉnh/thành.\n\n"
+            "Ví dụ:\n"
+            "<code>/tinh An Giang</code>",
             parse_mode="HTML",
         )
         return
 
-    os.makedirs("data", exist_ok=True)
-    excel_file_path = os.path.join(
-        "data", f"{filename_prefix}_{today.strftime('%d%m%Y')}.xlsx"
+    province = " ".join(context.args)
+
+    events = get_events_by_province(
+        province,
+        days=30,
     )
 
-    with pd.ExcelWriter(excel_file_path, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="Danh Sách Sự Kiện", index=False)
-
-    caption_text = (
-        f"📊 <b>BÁO CÁO XUẤT EXCEL SỰ KIỆN MIỀN NAM</b>\n\n🗓️ Khoảng thời gian:"
-        f" <b>{period_title}</b>\n📈 Tổng số ghi nhận: <b>{len(df)} sự kiện</b>"
+    message = format_event_list(
+        events,
+        title=f"SỰ KIỆN TẠI {province.upper()}",
     )
 
-    with open(excel_file_path, "rb") as f:
-        await update.message.reply_document(
-            document=f,
-            filename=os.path.basename(excel_file_path),
-            caption=caption_text,
+    await update.message.reply_text(
+        message,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+
+
+async def search_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ Vui lòng nhập từ khóa.\n\n"
+            "Ví dụ:\n"
+            "<code>/sukien Nguyễn Trung Trực</code>\n"
+            "<code>/sukien lễ hội</code>",
             parse_mode="HTML",
         )
+        return
 
+    keyword = " ".join(context.args)
 
-async def cmd_excel_thang(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh tắt /excel_thang để xuất nhanh Excel theo tháng."""
-    context.args = ["thang"]
-    await cmd_excel(update, context)
-
-
-def send_daily_event_report():
-    """Hàm tự động gửi báo cáo sự kiện hàng ngày qua Telegram."""
-    init_db()
-    today_str = datetime.now().strftime("%Y-%m-%d")
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM events WHERE raw_date >= ? ORDER BY raw_date ASC LIMIT 10",
-        (today_str,),
+    events = search_events(
+        keyword,
+        limit=20,
     )
-    rows = cursor.fetchall()
-    conn.close()
 
-    if not rows:
-        send_telegram_message(
-            "<b>BẢN TIN SỰ KIỆN HÔM NAY</b>\n\nHôm nay chưa ghi nhận sự kiện mới nào."
+    message = format_event_list(
+        events,
+        title=f"KẾT QUẢ: {keyword}",
+    )
+
+    await update.message.reply_text(
+        message,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+
+
+
+async def excel_command(
+    update,
+    context,
+):
+    """
+    Xuất danh sách sự kiện ra Excel.
+
+    /excel tuan
+    /excel thang
+    """
+
+    if not context.args:
+        await update.message.reply_text(
+            "Cách dùng:\n"
+            "/excel tuan - Xuất sự kiện 7 ngày tới\n"
+            "/excel thang - Xuất sự kiện tháng hiện tại"
         )
         return
 
-    events = [dict(r) for r in rows]
-    report = format_daily_report(
-        events, title_prefix="BẢN TIN SỰ KIỆN MIỀN NAM"
-    )
-    send_telegram_message(report)
+    mode = context.args[0].lower()
 
-
-def start_bot_polling():
-    """Khởi chạy Bot lắng nghe 24/7 toàn bộ các lệnh."""
-    token = str(TELEGRAM_BOT_TOKEN).strip() if TELEGRAM_BOT_TOKEN else ""
-    if token.startswith("bot"):
-        token = token[3:]
-
-    if not token:
-        logger.error("Chưa cấu hình TELEGRAM_BOT_TOKEN trong file .env!")
+    if mode not in ["tuan", "thang"]:
+        await update.message.reply_text(
+            "Tham số không hợp lệ.\n\n"
+            "Dùng:\n"
+            "/excel tuan\n"
+            "/excel thang"
+        )
         return
 
-    app = ApplicationBuilder().token(token).build()
+    db_mode = "week" if mode == "tuan" else "month"
 
-    # Đăng ký các Handler lệnh
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("homnay", cmd_homnay))
-    app.add_handler(CommandHandler("tuannay", cmd_tuannay))
-    app.add_handler(CommandHandler("tinh", cmd_tinh))
-    app.add_handler(CommandHandler("sukien", cmd_sukien))
-    app.add_handler(CommandHandler("excel", cmd_excel))
-    app.add_handler(CommandHandler("excel_thang", cmd_excel_thang))
+    try:
+        output_path, count = export_events_to_excel(
+            mode=db_mode,
+        )
 
-    logger.info(
-        "🤖 Bot Telegram đang chạy lắng nghe các lệnh (/start, /homnay, /tuannay, /tinh,"
-        " /sukien, /excel, /excel_thang)..."
-    )
-    app.run_polling()
+        if count == 0:
+            await update.message.reply_text(
+                "Không có sự kiện để xuất Excel."
+            )
+            return
+
+        with open(
+            output_path,
+            "rb",
+        ) as excel_file:
+
+            await update.message.reply_document(
+                document=excel_file,
+                filename=os.path.basename(
+                    output_path
+                ),
+                caption=(
+                    f"📊 Danh sách sự kiện "
+                    f"{'7 ngày tới' if mode == 'tuan' else 'tháng hiện tại'}\n"
+                    f"📌 Tổng cộng: {count} sự kiện"
+                ),
+            )
+
+    except Exception as error:
+        await update.message.reply_text(
+            f"❌ Không thể xuất Excel: {error}"
+        )
