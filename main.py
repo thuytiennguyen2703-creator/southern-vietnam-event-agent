@@ -59,8 +59,8 @@ import logging
 VN_TIMEZONE = timezone(timedelta(hours=7))
 
 def daily_scheduler_loop():
-    TARGET_HOUR = 10   # Đổi thành 10 giờ sáng
-    TARGET_MINUTE = 30 # Đổi thành 30 phút (10:30)
+    TARGET_HOUR = 7    # Đổi về 7 giờ sáng
+    TARGET_MINUTE = 0  # Đổi thành 0 phút (07:00)
     last_run_day = None
 
     logging.info(f"⏰ Scheduler đã khởi động (Chạy định kỳ lúc {TARGET_HOUR:02d}:{TARGET_MINUTE:02d} AM giờ VN hàng ngày)...")
@@ -69,9 +69,9 @@ def daily_scheduler_loop():
         # Lấy thời gian chuẩn theo múi giờ Việt Nam (bất kể server Render đặt ở đâu)
         now = datetime.now(VN_TIMEZONE)
         
-        # Kiểm tra đúng 10:30 sáng và mỗi ngày chỉ chạy 1 lần duy nhất
+        # Kiểm tra đúng 07:00 sáng và mỗi ngày chỉ chạy 1 lần duy nhất
         if now.hour == TARGET_HOUR and now.minute >= TARGET_MINUTE and last_run_day != now.date():
-            logging.info("🚀 Đến giờ hẹn 10:30 sáng VN! Bắt đầu cào dữ liệu & gửi báo cáo hàng ngày...")
+            logging.info("🚀 Đến giờ hẹn 07:00 sáng VN! Bắt đầu cào dữ liệu & gửi báo cáo hàng ngày...")
             try:
                 # KÍCH HOẠT CÀO DỮ LIỆU ĐỊNH KỲ
                 run_full_pipeline()
