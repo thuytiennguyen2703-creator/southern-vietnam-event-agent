@@ -23,39 +23,64 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # Danh sách nguồn RSS công khai (Đã tối ưu hóa URL hoạt động ổn định)
 RSS_SOURCES = [
-    # Nguồn Báo chí / Văn hóa - Giải trí / Du lịch lớn
+    # ---- Báo điện tử lớn (RSS) ----
     {
-        "name": "Thanh Niên",
-        "url": "https://thanhnien.vn/rss/van-hoa.rss"
-    },
-    {
-        "name": "Tuổi Trẻ",
-        "url": "https://tuoitre.vn/rss/van-hoa.rss"
-    },
-    {
-        "name": "Tiền Phong",
-        "url": "https://tienphong.vn/rss/giai-tri-36.rss"
-    },
-    {
-        "name": "VnExpress Giải trí",
-        "url": "https://vnexpress.net/rss/giai-tri.rss"
-    },
-    {
-        "name": "VnExpress Du lịch",
+        "name": "VnExpress - Du lịch",
         "url": "https://vnexpress.net/rss/du-lich.rss"
     },
     {
-        "name": "Báo Dân Trí",
+        "name": "VnExpress - Giải trí",
+        "url": "https://vnexpress.net/rss/giai-tri.rss"
+    },
+    {
+        "name": "VnExpress - Thể thao",
+        "url": "https://vnexpress.net/rss/the-thao.rss"
+    },
+    {
+        "name": "Tuổi Trẻ - Du lịch",
+        "url": "https://tuoitre.vn/rss/du-lich.rss"
+    },
+    {
+        "name": "Tuổi Trẻ - Văn hóa",
+        "url": "https://tuoitre.vn/rss/van-hoa.rss"
+    },
+    {
+        "name": "Thanh Niên - Du lịch",
+        "url": "https://thanhnien.vn/rss/du-lich.rss"
+    },
+    {
+        "name": "Thanh Niên - Văn hóa",
+        "url": "https://thanhnien.vn/rss/van-hoa.rss"
+    },
+    {
+        "name": "Tiền Phong - Giải trí",
+        "url": "https://tienphong.vn/rss/giai-tri-36.rss"
+    },
+    {
+        "name": "Báo Dân Trí - Giải trí",
         "url": "https://dantri.com.vn/rss/giai-tri.rss"
     },
     {
-        "name": "Báo Người Lao Động",
+        "name": "Báo Người Lao Động - Văn hóa",
         "url": "https://nld.com.vn/rss/van-hoa-van-nghe.rss"
     },
-    # Nguồn Cổng thông tin điện tử địa phương
+
+    # ---- Báo địa phương ----
+    {
+        "name": "Báo Tây Ninh - Văn hóa",
+        "url": "https://baotayninh.vn/rss/news/van-hoa.rss",
+    },
+    {
+        "name": "Báo Tây Ninh - Du lịch",
+        "url": "https://baotayninh.vn/rss/news/du-lich.rss",
+    },
+    {
+        "name": "Báo Tây Ninh - Sự kiện",
+        "url": "https://baotayninh.vn/rss/news/van-de-su-kien.rss",
+    },
     {
         "name": "Cổng TTĐT Vĩnh Long",
-        "url": "https://vinhlong.gov.vn/rss/tintuc.rss"
+        "url": "https://vinhlong.gov.vn/rss/tintuc.rss",
     }
 ]
 
