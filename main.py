@@ -51,16 +51,27 @@ def start_health_check_server():
 # -------------------------------------------------------------
 # Luồng Lập lịch Cào dữ liệu & Gửi báo cáo hàng ngày
 # -------------------------------------------------------------
+from datetime import datetime, timezone, timedelta
+import time
+import logging
+
+# Định nghĩa múi giờ Việt Nam (UTC+7)
+VN_TIMEZONE = timezone(timedelta(hours=7))
+
 def daily_scheduler_loop():
-    TARGET_HOUR = 7  # Gửi báo cáo lúc 07:00 sáng
+    TARGET_HOUR = 10   # Đổi thành 10 giờ sáng
+    TARGET_MINUTE = 30 # Đổi thành 30 phút (10:30)
     last_run_day = None
 
-    logging.info(f"⏰ Scheduler đã khởi động (Chạy định kỳ {TARGET_HOUR}:00 AM hàng ngày)...")
+    logging.info(f"⏰ Scheduler đã khởi động (Chạy định kỳ lúc {TARGET_HOUR:02d}:{TARGET_MINUTE:02d} AM giờ VN hàng ngày)...")
     
     while True:
-        now = datetime.now()
-        if now.hour == TARGET_HOUR and last_run_day != now.date():
-            logging.info("🚀 Đến giờ hẹn! Bắt đầu cào dữ liệu & gửi báo cáo hàng ngày...")
+        # Lấy thời gian chuẩn theo múi giờ Việt Nam (bất kể server Render đặt ở đâu)
+        now = datetime.now(VN_TIMEZONE)
+        
+        # Kiểm tra đúng 10:30 sáng và mỗi ngày chỉ chạy 1 lần duy nhất
+        if now.hour == TARGET_HOUR and now.minute >= TARGET_MINUTE and last_run_day != now.date():
+            logging.info("🚀 Đến giờ hẹn 10:30 sáng VN! Bắt đầu cào dữ liệu & gửi báo cáo hàng ngày...")
             try:
                 # KÍCH HOẠT CÀO DỮ LIỆU ĐỊNH KỲ
                 run_full_pipeline()
@@ -70,7 +81,7 @@ def daily_scheduler_loop():
             except Exception as e:
                 logging.error(f"❌ Lỗi trong quá trình chạy luồng hàng ngày: {e}", exc_info=True)
 
-        time.sleep(60)
+        time.sleep(30) # Kiểm tra định kỳ mỗi 30 giây
 
 # -------------------------------------------------------------
 # Khởi chạy hệ thống

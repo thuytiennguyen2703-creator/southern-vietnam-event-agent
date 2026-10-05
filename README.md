@@ -5,11 +5,12 @@ Hệ thống tự động cào tin lễ hội/sự kiện Miền Nam từ báo c
 ---
 
 ## Tính năng chính
-- **Cào tự động**: Hơn 8 nguồn báo lớn (Thanh Niên, Tuổi Trẻ, VnExpress, Dân Trí, Cổng TTĐT tỉnh,...).
+- **Cào tự động**: Hơn 5 nguồn báo lớn (Thanh Niên, Tuổi Trẻ, VnExpress, Dân Trí, Cổng TTĐT tỉnh,...).
 - **Trích xuất AI**: Dùng RegEx & Gemini AI lấy chuẩn: *Tên sự kiện, Tỉnh, Địa điểm, Ngày, Quy mô, Link*.
 - **Lịch tự động**: Gửi bản tin sự kiện 7 ngày tới vào **07:00 AM hàng ngày** qua Telegram.
 - **Cảnh báo HOT**: Đánh dấu nổi bật sự kiện quy mô ≥10.000 người, pháo hoa, concert.
 - **Bot tương tác**: Tra cứu sự kiện qua lệnh `/homnay`, `/tuannay`, `/tinh`, `/sukien`, `/excel`.
+- **Log & Giám sát**: Tự động ghi log và kiểm tra trạng thái sức khỏe (Health Check) phục vụ cho Render & UptimeRobot.
 
 ---
 
@@ -71,6 +72,14 @@ python main.py
 ## Lệnh Tra Cứu Trên Telegram Bot
 - `/homnay`: Sự kiện diễn ra hôm nay.
 - `/tuannay`: Danh sách sự kiện 7 ngày tới.
-- `/tinh <tên tỉnh>`: Lọc sự kiện theo tỉnh (VD: `/tinh TPHCM`).
-- `/sukien <từ khóa>`: Tìm kiếm theo từ khóa (VD: `/sukien pháo hoa`).
+- `/tinh <tên tỉnh>`: Lọc sự kiện theo tỉnh (VD: `/tinh TP.HCM`).
+- `/sukien <từ khóa>`: Tìm kiếm theo từ khóa (VD: `/sukien Nhạc`).
 - `/excel`: Xuất file Excel sự kiện tuần này.
+
+---
+
+## Lý do lựa chọn Telegram Bot API
+Trong số các nền tảng nhắn tin (Telegram, Zalo OA, WhatsApp), dự án đã chọn **Telegram Bot API** làm giải pháp chính:
+- **Tốc độ triển khai & Tự động hóa hoàn toàn**: BotFather cho phép khởi tạo bot chỉ trong vài giây, miễn phí 100% và không giới hạn lượt gửi tin nhắn tự động.
+- **Không phát sinh chi phí & Thủ tục**: Tránh được các rào cản kiểm duyệt doanh nghiệp phức tạp, đăng ký giấy phép Official Account (như Zalo OA) hay phí gửi tin nhắn chủ động qua API.
+- **Hỗ trợ tốt**: Gửi file Excel, xử lý lệnh tương tác (`/homnay`, `/tuannay`,...) mượt mà và bảo mật tốt.
