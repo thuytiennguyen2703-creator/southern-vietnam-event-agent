@@ -83,11 +83,8 @@ def event_dedup_key(event):
     """
     Tạo khóa deduplicate cho event.
 
-    Ưu tiên:
-    name + province + start_time
-
-    Vì cùng một sự kiện có thể xuất hiện
-    trên nhiều báo với URL khác nhau.
+    Chuẩn hóa các biến thể tên của cùng một sự kiện,
+    đặc biệt các bài báo có cách gọi khác nhau.
     """
 
     name = normalize_text(
@@ -101,6 +98,17 @@ def event_dedup_key(event):
     start_time = normalize_text(
         event.get("start_time")
     )
+
+    # Gom các cách gọi khác nhau của lễ hội Nguyễn Trung Trực
+    # tại An Giang về cùng một event.
+    if (
+        "nguyễn trung trực" in name
+        and province == "an giang"
+    ):
+        return (
+            "le hoi nguyen trung truc",
+            province,
+        )
 
     return (
         name,
@@ -569,15 +577,11 @@ def search_events(keyword):
             pattern,
             pattern,
             pattern,
-            now.isoformat(
-                timespec="seconds"
-            ),
-            now.isoformat(
-                timespec="seconds"
-            ),
-            now.isoformat(
-                timespec="seconds"
-            ),
+            now.isoformat(timespec="seconds"),
+            now.isoformat(timespec="seconds"),
+            now.isoformat(timespec="seconds"),
+            now.isoformat(timespec="seconds"),
+            now.isoformat(timespec="seconds"),
         ),
     )
 

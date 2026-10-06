@@ -125,13 +125,34 @@ def scrape_html_source(source: dict) -> list[dict]:
 
         url = urljoin(source["url"], url)
 
+        if url.startswith("#"):
+            continue
+
         if url in seen_urls:
+            continue
+
+        if len(title) < 20:
+            continue
+
+        excluded_titles = [
+            "trang chủ",
+            "home",
+            "video",
+            "podcast",
+            "liên hệ",
+            "quảng cáo",
+            "tìm kiếm",
+            "đăng nhập",
+            "đăng ký",
+        ]
+
+        if title.lower() in excluded_titles:
             continue
 
         seen_urls.add(url)
 
-        if url.startswith("#"):
-            continue
+        #article_content = extract_article_content(url)
+        article_content = ""
 
         articles.append({
             "source_name": source["name"],
@@ -140,7 +161,7 @@ def scrape_html_source(source: dict) -> list[dict]:
             "title": title,
             "url": url,
             "summary": "",
-            "content": "",
+            "content": article_content,
             "published": "",
         })
 

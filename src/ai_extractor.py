@@ -952,10 +952,18 @@ def extract_event(
                 0,
             )
 
-            event["priority"] = article.get(
-                "priority",
-                "normal",
-            )
+            if (
+                event["expected_attendance"] is not None
+                and event["expected_attendance"] >= 10000
+            ):
+                event["priority"] = "high"
+            elif event["fireworks"]:
+                event["priority"] = "high"
+            else:
+                event["priority"] = article.get(
+                    "priority",
+                    "normal",
+                )
 
 
             return event

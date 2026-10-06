@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sources import SOURCES
-from src.scraper import scrape_source
+from src.scraper import scrape_source, extract_article_content
 from src.parser import parse_articles
 from src.ai_extractor import extract_events
 from src.database import (
@@ -167,6 +167,7 @@ def is_past_event(event: dict) -> bool:
         return start_time < now
 
     return False
+    
 
 
 def validate_event(event: dict) -> bool:
@@ -525,6 +526,11 @@ def run_pipeline():
     event_articles = parse_articles(
         all_articles
     )
+
+    for article in event_articles: 
+        article["content"] = extract_article_content(
+            article.get("url", "")
+        )
 
     print()
     print(

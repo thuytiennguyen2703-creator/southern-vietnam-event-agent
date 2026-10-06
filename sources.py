@@ -55,6 +55,18 @@ SOURCES = [
     },
 
     {
+        "name": "Dân Trí - Giải trí",
+        "url": "https://dantri.com.vn/giai-tri.htm",
+        "type": "html",
+    },
+    
+    {
+        "name": "Vietnam.vn - Văn hóa xã hội",
+        "url": "https://www.vietnam.vn/category/van-hoa-xa-hoi",
+        "type": "html",
+    },
+
+    {
         "name": "Báo An Giang",
         "url": "https://baoangiang.com.vn/",
         "type": "html",
