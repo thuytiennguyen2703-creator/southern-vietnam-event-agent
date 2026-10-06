@@ -142,15 +142,12 @@ def is_past_event(event: dict) -> bool:
     """
     Kiểm tra event đã kết thúc hoàn toàn hay chưa.
 
-    - Nếu có end_time:
+    - Có end_time:
         Chỉ loại khi end_time đã qua.
-    - Nếu không có end_time:
-        Giữ nguyên event.
-    - Nếu không có start_time:
-        Giữ nguyên event.
-
-    Như vậy event đã bắt đầu nhưng vẫn đang diễn ra
-    sẽ KHÔNG bị loại.
+    - Không có end_time nhưng có start_time:
+        Loại nếu start_time đã qua.
+    - Không có start_time:
+        Giữ nguyên vì chưa đủ dữ liệu để kết luận.
     """
 
     now = datetime.now()
@@ -161,6 +158,13 @@ def is_past_event(event: dict) -> bool:
 
     if end_time is not None:
         return end_time < now
+
+    start_time = parse_event_date(
+        event.get("start_time")
+    )
+
+    if start_time is not None:
+        return start_time < now
 
     return False
 

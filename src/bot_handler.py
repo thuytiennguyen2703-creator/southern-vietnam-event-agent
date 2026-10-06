@@ -355,10 +355,7 @@ async def province_command(
 
     province = " ".join(context.args)
 
-    events = get_events_by_province(
-        province,
-        days=30,
-    )
+    events = get_events_by_province(province)
 
     message = format_event_list(
         events,
@@ -388,10 +385,7 @@ async def search_command(
 
     keyword = " ".join(context.args)
 
-    events = search_events(
-        keyword,
-        limit=20,
-    )
+    events = search_events(keyword)
 
     message = format_event_list(
         events,
