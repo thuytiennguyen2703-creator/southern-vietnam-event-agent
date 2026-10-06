@@ -540,9 +540,20 @@ def search_events(keyword):
             created_at
         FROM events
         WHERE
-            name LIKE ?
-            OR province LIKE ?
-            OR location LIKE ?
+            (
+                name LIKE ?
+                OR province LIKE ?
+                OR location LIKE ?
+            )
+            AND (
+                start_time IS NULL
+                OR start_time >= ?
+                OR (
+                    start_time < ?
+                    AND end_time IS NOT NULL
+                    AND end_time >= ?
+                )
+            )
         ORDER BY
             CASE
                 WHEN start_time IS NULL THEN 1
@@ -558,6 +569,9 @@ def search_events(keyword):
             pattern,
             pattern,
             pattern,
+            now.isoformat(
+                timespec="seconds"
+            ),
             now.isoformat(
                 timespec="seconds"
             ),
