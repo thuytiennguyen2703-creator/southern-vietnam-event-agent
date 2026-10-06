@@ -277,6 +277,12 @@ def main():
         name="daily_event_bulletin_0700",
     )
 
+    app.job_queue.run_once(
+        refresh_events,
+        when=5,
+        name="initial_event_refresh",
+    )
+
     print("Telegram bot is running...")
     print(
         "Event refresh scheduled at "
